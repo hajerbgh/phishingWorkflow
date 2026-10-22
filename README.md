@@ -125,7 +125,7 @@ python tests/tests.py
 phishing_soar/
 ├── analyzer/            # API FastAPI (analyse, enrichissement, blocage)
 ├── n8n/workflow.json    # workflow exporté
-├── tests/tests.py       # e-mails de démonstration
+├── test.py       # e-mails de démonstration
 ├── docs/                # captures et vidéo
 ├── docker-compose.yml
 ├── .env.example
