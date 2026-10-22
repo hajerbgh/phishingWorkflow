@@ -9,7 +9,8 @@ Mini-SOAR de bout en bout, 100 % local, qui récupère les e-mails signalés par
 ## Démo
 
 <!-- Remplace par ta vidéo (lien YouTube non répertorié ou fichier glissé dans l'éditeur GitHub) -->
-[Voir la démo vidéo]https://drive.google.com/file/d/1Ch_huH3AfXwiHNoM98DCCXhuTmaXIzA2/view?usp=sharing
+[Voir la démo vidéo]
+https://drive.google.com/file/d/1Ch_huH3AfXwiHNoM98DCCXhuTmaXIzA2/view?usp=sharing
 
 ![Workflow n8n](docs/workflow.png)
 
