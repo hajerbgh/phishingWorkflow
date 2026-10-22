@@ -156,4 +156,4 @@ phishing_soar/
 
 ## Auteure
 
-Hajer Benghazi, étudiante en génie informatique (FST), spécialisée en cybersécurité Blue Team / SOC.
+Hajer Benghazi, étudiante en Computer Engineering (FST), passionnée par la  cybersécurité Blue Team / SOC.
