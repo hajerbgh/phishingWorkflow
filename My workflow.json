@@ -1,0 +1,429 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -416,
+        0
+      ],
+      "id": "3382b0c9-ebf5-4877-ac99-a6bff9eae4b1",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "http://mailhog:8025/api/v2/search?kind=to&query=phishing-report@lab.local",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "0f34e15b-713d-4865-97c6-d220d7d56f0d",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Récupère l'input brut de la requête Mailhog\nconst input = $input.first().json;\nlet mailhogData = input.data;\n\n// 2. Si data est une chaîne de caractères (string), on la parse en objet JSON\nif (typeof mailhogData === 'string') {\n    try {\n        mailhogData = JSON.parse(mailhogData);\n    } catch (e) {\n        mailhogData = {};\n    }\n} else if (!mailhogData) {\n    mailhogData = input;\n}\n\nlet items = mailhogData.items || [];\n\n// 3. Si aucun e-mail n'est trouvé, on retourne un tableau vide pour stopper le workflow proprement\nif (items.length === 0) {\n    return [];\n}\n\n// 4. On parcourt chaque e-mail pour créer un item n8n indépendant (résout le bug du \"dernier mail unique\")\nreturn items.map(email => {\n    let mailId = email.ID || \"\"; // On garde l'ID pour la suppression finale (Bug 3)\n    \n    // On récupère directement le mail brut complet (en-têtes + corps) depuis Raw.Data (Bug 4)\n    let rawEmailData = email.Raw?.Data || \"\";\n\n    return {\n        json: {\n            id: mailId,          // Transmet l'ID pour plus tard\n            rawEmail: rawEmailData // Transmet le mail complet à ton API FastAPI /analyze\n        }\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        0
+      ],
+      "id": "c12d4d6e-eafe-413b-a5a0-fd1bb0aa6555",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analyzer:8000/analyze",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "rawEmail",
+              "value": "={{ $json.rawEmail }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        32,
+        0
+      ],
+      "id": "d2ebf4ce-019c-4c73-bbf8-d3b7d920cf3a",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const inputData = $input.item.json;\nlet score = 0;\nlet reasons = [];\n\n// Les familles de signaux pour croiser les preuves\nlet hasLookalike = false;      // Famille 1 : Faux domaine (Typosquatting)\nlet hasReplyToMismatch = false; // Famille 2 : Détournement de réponse\nlet hasRiskyAttachment = false; // Famille 3 : Pièce jointe dangereuse\nlet hasPressureWords = false;   // Famille 4 : Urgence / Pression psychologique\nlet hasAuthFailure = false;     // Famille 5 : Échec SPF/DKIM\nlet hasKnownMalware = false;    // Ajout : Pièce jointe connue comme malware (VirusTotal)\n\n// 1. Analyse granulaire des règles déclenchées par FastAPI\nif (inputData.rules_triggered && Array.isArray(inputData.rules_triggered)) {\n    inputData.rules_triggered.forEach(rule => {\n        let pts = rule.points || 0;\n        score += pts;\n        reasons.push(rule.reason);\n\n        // On identifie chaque famille de menace\n        if (rule.rule === \"lookalike_domain\") hasLookalike = true;\n        if (rule.rule === \"reply_to_mismatch\") hasReplyToMismatch = true;\n        if (rule.rule === \"risky_attachment\") hasRiskyAttachment = true;\n        if (rule.rule === \"pressure_words\") hasPressureWords = true;\n        if (rule.rule === \"known_malware\") hasKnownMalware = true;\n        if (rule.rule === \"auth_fail\") hasAuthFailure = true;\n    });\n}\n\n// (Le bloc redondant de vérification des en-têtes d'authentification a été entièrement supprimé ici)\n\n// 3. Analyse de l'enrichissement (VirusTotal / Âge du domaine)\nlet maliciousVtCount = 0;\nif (inputData.enrichment && inputData.enrichment.domains) {\n    for (const [domain, info] of Object.entries(inputData.enrichment.domains)) {\n        if (info.age_days !== null && info.age_days < 7) {\n            score += 20;\n            reasons.push(`Domaine récent (${domain}) créé il y a ${info.age_days} jours (+20)`);\n        }\n        if (info.vt_malicious && info.vt_malicious >= 3) {\n            maliciousVtCount += info.vt_malicious;\n            score += 35;\n            reasons.push(`VirusTotal signale ${domain} comme malveillant (+35)`);\n        }\n    }\n}\n\n// ==========================================\n// INTELLIGENCE ARTIFICIELLE / LOGIQUE MÉTIER\n// Corrélation de preuves (Le vrai cerveau SOC)\n// ==========================================\n\nlet verdict = \"BENIGN\";\nlet confidence = \"Low\";\n\n// Règle de corrélation 1 : Un exécutable louche + un faux domaine de marque = MALICIOUS direct\nif (hasRiskyAttachment && hasLookalike) {\n    score = Math.max(score, 75);\n    reasons.push(\"[Corrélation SOC] Pièce jointe exécutable combinée à une usurpation de marque.\");\n}\n\n// Règle de corrélation 2 : Faux domaine + Reply-to externe = Attaque par spear-phishing classique\nif (hasLookalike && hasReplyToMismatch) {\n    score = Math.max(score, 65);\n    reasons.push(\"[Corrélation SOC] Usurpation de marque couplée à un détournement de réponse (Reply-To).\");\n}\n\n// Plafonnement du score à 100\nscore = Math.min(score, 100);\n\n// Attribution du verdict intelligent\nlet distinctSignalsCount = [hasLookalike, hasReplyToMismatch, hasRiskyAttachment, hasPressureWords, hasAuthFailure, hasKnownMalware].filter(Boolean).length;\n\nif (score >= 60 && distinctSignalsCount >= 2) {\n    verdict = \"MALICIOUS\";\n    confidence = \"High\";\n} else if (score >= 30 || (score >= 20 && distinctSignalsCount >= 2)) {\n    verdict = \"SUSPICIOUS\";\n    confidence = \"Medium\";\n} else {\n    verdict = \"BENIGN\";\n    confidence = \"Low\"; // Corrigé ici : passe à Low au lieu de High par défaut\n}\n\n// --- RÈGLES DE SURCHARGE DE VERDICT (PLANCHERS ET CORRÉLATIONS SOC) ---\nif (hasKnownMalware) {\n    verdict = \"MALICIOUS\"; \n    confidence = \"High\"; \n    score = Math.max(score, 85);\n    reasons.push(\"[Corrélation SOC] Pièce jointe connue comme malware (VirusTotal)\");\n} else if (hasRiskyAttachment && verdict === \"BENIGN\") {\n    verdict = \"SUSPICIOUS\"; \n    confidence = \"Medium\"; \n    score = Math.max(score, 30);\n    reasons.push(\"[Plancher] Exécutable en pièce jointe : jamais BENIGN\");\n}\n\n// Récupération de l'ID d'origine pour le nettoyage de Mailhog\nlet mailId = \"\";\ntry {\n    mailId = $('Code in JavaScript').item.json.id;\n} catch (e) {\n    mailId = inputData.id || \"\";\n}\n\nreturn {\n    json: {\n        id: mailId,\n        score: score,\n        verdict: verdict,\n        confidence: confidence,\n        reasons: reasons,\n        details: inputData\n    }\n};;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "e62471e0-5721-4282-867c-04f78acc3037",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.verdict }}",
+                    "rightValue": "MALICIOUS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f4155a62-c53b-4a06-b0a8-1e4ea19ef9c1"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "ef4fadde-8ef4-4a88-8e82-c1934a2cc8bd",
+                    "leftValue": "={{ $json.verdict }}",
+                    "rightValue": "SUSPICIOUS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a927fe53-2577-4d83-8eb0-f0ec8d34f712",
+                    "leftValue": "={{ $json.verdict }}",
+                    "rightValue": "BENIGN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        400,
+        -16
+      ],
+      "id": "b2b6b393-f55c-40c8-ad10-7db7d023f9da",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const data = $input.item.json;\n// On extrait les domaines des URLs détectées ou l'adresse email de l'attaquant\nlet domainsToBlock = [];\n\nif (data.details && data.details.urls) {\n    data.details.urls.forEach(url => {\n        try {\n            let domain = new URL(url).hostname;\n            domainsToBlock.push(domain);\n        } catch(e) {}\n    });\n}\n\n// Ajout du domaine de l'expéditeur frauduleux si présent\nif (data.details && data.details.from_address) {\n    let senderDomain = data.details.from_address.split('@')[1];\n    if (senderDomain) domainsToBlock.push(senderDomain);\n}\n\nreturn {\n    json: {\n        domains: [...new Set(domainsToBlock)] // Supprime les doublons en JS aussi\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        -224
+      ],
+      "id": "1de63f6b-c247-4018-b89b-1b6f6b02559b",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analyzer:8000/block",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"domains\": $json.domains } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        832,
+        -352
+      ],
+      "id": "86ed49b5-b294-4fc1-bbe5-c0f3a05c5fb1",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "fromEmail": "soc-alert@lab.local",
+        "toEmail": "analyst@lab.local",
+        "subject": "=🚨 [ALERTE SOC] Phishing bloqué - Score : {{ $('Code in JavaScript1').item.json.details.subject }}",
+        "emailFormat": "text",
+        "text": "=Une tentative de phishing critique a été détectée et bloquée automatiquement.\n\n- Sujet du mail : {{ $('Code in JavaScript1').item.json.details.subject }}\n- Expéditeur : {{ $('Code in JavaScript1').item.json.details.from_address }}\n- Score de risque : {{ $('Code in JavaScript1').item.json.score }}\n- Raisons : {{ $('Code in JavaScript1').item.json.reasons }}\nLes domaines malveillants ont été ajoutés avec succès à la blocklist locale.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        976,
+        -368
+      ],
+      "id": "9b998129-418d-4244-bc51-a60e26fbfd6f",
+      "name": "Send an Email",
+      "webhookId": "f3d62727-b11c-4f61-bfba-c5c7049457f7",
+      "credentials": {
+        "smtp": {
+          "id": "emnBFUendkJOO1gZ",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "soc-queue@lab.local",
+        "toEmail": "analyst@lab.local",
+        "subject": "=⚠️ [SOC - À VÉRIFIER] Mail suspect détecté - Score : {{ $('Code in JavaScript1').item.json.score }}",
+        "emailFormat": "text",
+        "text": "=Un e-mail ambigu a été intercepté et mis en attente pour une vérification manuelle. Aucun blocage automatique n'a été appliqué.\n\n- Sujet : {{ $json.details.subject }}\n- Expéditeur : {{ $json.details.from_address }}\n- Score de risque : {{ $json.score }}\n- Raisons de l'alerte : {{ $('Code in JavaScript1').item.json.reasons.join(', ') }}\n\nVeuillez examiner ce message directement dans l'interface Mailhog (http://localhost:8025) pour valider ou rejeter la menace.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        -48
+      ],
+      "id": "044d0b68-7117-4735-834d-d85e47462fb7",
+      "name": "Send an Email1",
+      "webhookId": "40cb7ef8-4116-4231-b484-5ace10a97d9b",
+      "credentials": {
+        "smtp": {
+          "id": "emnBFUendkJOO1gZ",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "security-bot@lab.local",
+        "toEmail": "user@lab.local",
+        "subject": "✅ Rapport d'analyse : Aucun danger détecté",
+        "emailFormat": "text",
+        "text": "=Bonjour,\n\nTon signalement ou e-mail récent a bien été analysé par notre plateforme de sécurité (SOAR). \n- Sujet : {{ $json.details.subject }}\n- Score de risque : {{ $json.score }} / 100\n\nNotre analyse automatique n’a détecté aucun indicateur de menace. En cas de doute, ne cliquez pas et contactez le support.\n\nCordialement,\nL'équipe SOC automatisée",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        656,
+        144
+      ],
+      "id": "38a453c7-8840-46ff-8e7b-6f1a071f5043",
+      "name": "Send an Email2",
+      "webhookId": "6526ec41-df29-4e99-b8a3-8d3b431d28eb",
+      "credentials": {
+        "smtp": {
+          "id": "oi4goznumZKL4Onj",
+          "name": "SMTP account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://mailhog:8025/api/v1/messages/{{ encodeURIComponent($('Code in JavaScript1').item.json.id) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        400,
+        384
+      ],
+      "id": "d9e5ea6c-1ec8-4965-8df8-dad46688dac8",
+      "name": "HTTP Request3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send an Email1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send an Email2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an Email": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b124d510-3b12-4066-b582-8c03a262e70a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4a360b260a9df30ab409c94e69c07e100f89bbbd6a8652c87b0195a51ca2605e"
+  },
+  "nodeGroups": [],
+  "id": "KNEBEG3cVksY2TPc",
+  "tags": []
+}

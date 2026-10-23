@@ -1,0 +1,4 @@
+.env
+blocklist/
+__pycache__/
+*.pyc

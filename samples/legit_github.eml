@@ -1,0 +1,17 @@
+Return-Path: <noreply@github.com>
+Authentication-Results: mx.lab.local; spf=pass smtp.mailfrom=github.com; dkim=pass header.d=github.com; dmarc=pass header.from=github.com
+From: "GitHub" <noreply@github.com>
+To: etudiant@lab.local
+Subject: [GitHub] A new public key was added to your account
+Date: Sat, 17 Oct 2026 09:30:00 +0100
+Message-ID: <legit-001@github.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Hey there,
+
+A new public key was added to your account. If you did this, you can ignore this email.
+Review your keys: https://github.com/settings/keys
+
+Thanks,
+The GitHub Team

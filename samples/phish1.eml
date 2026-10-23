@@ -1,0 +1,29 @@
+Return-Path: <bounce@mailer-x7.top>
+Received: from mailer-x7.top (mailer-x7.top [185.220.101.45]) by mx.lab.local with ESMTP; Sat, 17 Oct 2026 10:12:03 +0100
+Authentication-Results: mx.lab.local; spf=fail smtp.mailfrom=mailer-x7.top; dkim=none; dmarc=fail header.from=microsoft-support.top
+From: "Microsoft 365 Security" <security@microsoft-support.top>
+Reply-To: helpdesk-recovery@gmail.com
+To: etudiant@lab.local
+Subject: URGENT: Votre compte sera suspendu dans 24 heures
+Date: Sat, 17 Oct 2026 10:12:00 +0100
+Message-ID: <abc123@mailer-x7.top>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<p>Bonjour,</p>
+<p>Activité inhabituelle détectée. Votre mot de passe expire aujourd'hui et votre compte sera suspendu immédiatement.</p>
+<p>Action required : <a href="http://185.220.101.45/o365/login.php?id=8841">https://login.microsoftonline.com/verify</a></p>
+<p>Ou utilisez ce lien court : http://bit.ly/3xYzAbC</p>
+<p>Cordialement,<br>Microsoft Security Team</p>
+</body></html>
+--BOUNDARY
+Content-Type: application/octet-stream; name="Facture_Octobre.pdf.exe"
+Content-Disposition: attachment; filename="Facture_Octobre.pdf.exe"
+Content-Transfer-Encoding: base64
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+--BOUNDARY--
